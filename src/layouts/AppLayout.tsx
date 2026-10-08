@@ -87,7 +87,7 @@ export function AppLayout() {
       {session && (
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mx: 2, mb: 1, p: 1.25, borderRadius: 2, bgcolor: 'rgba(255,255,255,.07)' }}>
           <Avatar sx={{ bgcolor: tokens.highlighter, color: '#000', fontWeight: 700, width: 38, height: 38 }}>
-            {session.teacher.name
+            {session.user.fullName
               .split(' ')
               .map((n) => n[0])
               .join('')
@@ -95,10 +95,10 @@ export function AppLayout() {
           </Avatar>
           <Box sx={{ minWidth: 0 }}>
             <Typography fontWeight={700} color="#fff" noWrap>
-              {session.teacher.name}
+              {session.user.fullName}
             </Typography>
             <Typography variant="caption" sx={{ color: 'rgba(255,255,255,.65)' }} noWrap>
-              {session.teacher.role}
+              {session.user.title}
             </Typography>
           </Box>
         </Stack>
@@ -189,7 +189,7 @@ export function AppLayout() {
             )}
             {session && (
               <Avatar sx={{ width: 34, height: 34, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}>
-                {session.teacher.name
+                {session.user.fullName
                   .split(' ')
                   .map((n) => n[0])
                   .join('')

@@ -1,32 +1,37 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { seedActivities, seedRecords } from '@/data/seed';
 import { secureStore } from '@/services/secureStore';
-import type { Activity, Annotation, TeachingRecord } from '@/types';
+import { useDirectory } from '@/context/DirectoryContext';
+import type { Activity, ActivityKind, Annotation, TeachingRecord } from '@/types';
 import { uid } from '@/utils/format';
 
 type ColorPref = 'light' | 'dark' | 'system';
 
 interface PlatformValue {
+  /** Every record in the system. Scope with `recordsFor` before showing them. */
   records: TeachingRecord[];
   activities: Activity[];
   annotations: Annotation[];
   bookmarks: string[];
   colorPref: ColorPref;
   ready: boolean;
+  /** A single user's records — what a teacher is allowed to see. */
+  recordsFor: (userId: string) => TeachingRecord[];
+  activitiesFor: (userId: string) => Activity[];
   /** Append-only: a record is added, never replaced. */
   addRecord: (record: TeachingRecord) => void;
-  log: (kind: Activity['kind'], text: string) => void;
+  log: (userId: string, kind: ActivityKind, text: string) => void;
   addAnnotation: (a: Omit<Annotation, 'id' | 'createdAt'>) => void;
   removeAnnotation: (id: string) => void;
-  setAnnotationsForDocument: (documentId: string, next: Annotation[]) => void;
   toggleBookmark: (id: string) => void;
   setColorPref: (pref: ColorPref) => void;
-  resetDemo: () => void;
+  resetDemo: () => Promise<void>;
 }
 
 const PlatformContext = createContext<PlatformValue | null>(null);
 
 export function PlatformProvider({ children }: { children: ReactNode }) {
+  const directory = useDirectory();
   const [records, setRecords] = useState<TeachingRecord[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -34,29 +39,37 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
   const [colorPref, setColorPrefState] = useState<ColorPref>('system');
   const [ready, setReady] = useState(false);
 
-  // Hydrate from storage once. Annotations are a personal layer and are the
-  // only content-adjacent thing kept on the device.
   useEffect(() => {
+    if (!directory.ready) return;
     let alive = true;
     (async () => {
-      const [storedAnnotations, storedBookmarks, storedTheme] = await Promise.all([
+      const [storedRecords, storedActivities, storedAnnotations, storedBookmarks, storedTheme] = await Promise.all([
+        secureStore.get<TeachingRecord[] | null>('records', null),
+        secureStore.get<Activity[] | null>('activities', null),
         secureStore.get<Annotation[]>('annotations', []),
         secureStore.get<string[]>('bookmarks', []),
         secureStore.get<ColorPref>('theme', 'system'),
       ]);
       if (!alive) return;
+      setRecords(storedRecords ?? seedRecords(directory.lessons));
+      setActivities(storedActivities ?? seedActivities());
       setAnnotations(storedAnnotations);
       setBookmarks(storedBookmarks);
       setColorPrefState(storedTheme);
-      setRecords(seedRecords());
-      setActivities(seedActivities());
       setReady(true);
     })();
     return () => {
       alive = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directory.ready]);
 
+  useEffect(() => {
+    if (ready) void secureStore.set('records', records);
+  }, [records, ready]);
+  useEffect(() => {
+    if (ready) void secureStore.set('activities', activities);
+  }, [activities, ready]);
   useEffect(() => {
     if (ready) void secureStore.set('annotations', annotations);
   }, [annotations, ready]);
@@ -64,12 +77,15 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
     if (ready) void secureStore.set('bookmarks', bookmarks);
   }, [bookmarks, ready]);
 
+  const recordsFor = useCallback((userId: string) => records.filter((r) => r.userId === userId), [records]);
+  const activitiesFor = useCallback((userId: string) => activities.filter((a) => a.userId === userId), [activities]);
+
   const addRecord = useCallback((record: TeachingRecord) => {
     setRecords((prev) => [record, ...prev]);
   }, []);
 
-  const log = useCallback((kind: Activity['kind'], text: string) => {
-    setActivities((prev) => [{ id: uid(), at: new Date().toISOString(), kind, text }, ...prev].slice(0, 200));
+  const log = useCallback((userId: string, kind: ActivityKind, text: string) => {
+    setActivities((prev) => [{ id: uid(), userId, at: new Date().toISOString(), kind, text }, ...prev].slice(0, 400));
   }, []);
 
   const addAnnotation = useCallback((a: Omit<Annotation, 'id' | 'createdAt'>) => {
@@ -78,10 +94,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
 
   const removeAnnotation = useCallback((id: string) => {
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
-  }, []);
-
-  const setAnnotationsForDocument = useCallback((documentId: string, next: Annotation[]) => {
-    setAnnotations((prev) => [...prev.filter((a) => a.documentId !== documentId), ...next]);
   }, []);
 
   const toggleBookmark = useCallback((id: string) => {
@@ -93,12 +105,13 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
     void secureStore.set('theme', pref);
   }, []);
 
-  const resetDemo = useCallback(() => {
-    setRecords(seedRecords());
+  const resetDemo = useCallback(async () => {
+    await directory.resetDemo();
+    setRecords(seedRecords(directory.lessons));
     setActivities(seedActivities());
     setAnnotations([]);
     setBookmarks([]);
-  }, []);
+  }, [directory]);
 
   const value = useMemo<PlatformValue>(
     () => ({
@@ -108,16 +121,17 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
       bookmarks,
       colorPref,
       ready,
+      recordsFor,
+      activitiesFor,
       addRecord,
       log,
       addAnnotation,
       removeAnnotation,
-      setAnnotationsForDocument,
       toggleBookmark,
       setColorPref,
       resetDemo,
     }),
-    [records, activities, annotations, bookmarks, colorPref, ready, addRecord, log, addAnnotation, removeAnnotation, setAnnotationsForDocument, toggleBookmark, setColorPref, resetDemo],
+    [records, activities, annotations, bookmarks, colorPref, ready, recordsFor, activitiesFor, addRecord, log, addAnnotation, removeAnnotation, toggleBookmark, setColorPref, resetDemo],
   );
 
   return <PlatformContext.Provider value={value}>{children}</PlatformContext.Provider>;

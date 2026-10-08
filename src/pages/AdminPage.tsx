@@ -1,97 +1,72 @@
 import { useMemo, useState } from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogTitle from '@mui/material/DialogTitle';
-import LinearProgress from '@mui/material/LinearProgress';
+import Divider from '@mui/material/Divider';
 import MenuItem from '@mui/material/MenuItem';
+import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined';
-import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
-import QuizOutlinedIcon from '@mui/icons-material/QuizOutlined';
-import SportsEsportsOutlinedIcon from '@mui/icons-material/SportsEsportsOutlined';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
-import VideoCallOutlinedIcon from '@mui/icons-material/VideoCallOutlined';
-import { CLASSES, LESSONS, SUBJECTS, TEACHER, getClass, lessonsFor } from '@/data/catalog';
+import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
+import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined';
+import LibraryBooksOutlinedIcon from '@mui/icons-material/LibraryBooksOutlined';
+import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
+import { useDirectory } from '@/context/DirectoryContext';
 import { usePlatform } from '@/context/PlatformContext';
-import { useToast } from '@/context/ToastContext';
-import { averageCoverage } from '@/services/progressService';
-import { config, isDemoContent } from '@/config/env';
-import { PageHeader } from '@/components/common';
+import { averageCoverage, filterLessons } from '@/services/progressService';
+import { EmptyState, PageHeader, ProgressRow } from '@/components/common';
+import { TeachersTab } from '@/pages/admin/TeachersTab';
+import { LessonsTab } from '@/pages/admin/LessonsTab';
+import { ActivityList } from '@/pages/ActivityPage';
+import { fmtDate } from '@/utils/format';
 
-const ACTIONS = [
-  { key: 'plan', label: 'Upload lesson plan', icon: <CloudUploadOutlinedIcon />, hint: 'JSON or DOCX converted to protected blocks on upload' },
-  { key: 'video', label: 'Upload video', icon: <VideoCallOutlinedIcon />, hint: 'Transcoded to HLS and served via short-lived SAS' },
-  { key: 'resource', label: 'Add resource', icon: <FolderOutlinedIcon />, hint: 'Worksheets and references, view-only for teachers' },
-  { key: 'qna', label: 'Manage Q&A', icon: <QuizOutlinedIcon />, hint: 'Questions shown to teachers in the lesson' },
-  { key: 'game', label: 'Manage game', icon: <SportsEsportsOutlinedIcon />, hint: 'Question bank for the in-lesson activity' },
-  { key: 'topics', label: 'Manage coverage topics', icon: <FactCheckOutlinedIcon />, hint: 'The checklist teachers record against' },
-];
+const TABS = [
+  { key: 'teachers', label: 'Teachers', icon: <GroupsOutlinedIcon /> },
+  { key: 'lessons', label: 'Lessons & content', icon: <LibraryBooksOutlinedIcon /> },
+  { key: 'progress', label: 'Progress', icon: <TrendingUpOutlinedIcon /> },
+  { key: 'records', label: 'Teaching records', icon: <FactCheckOutlinedIcon /> },
+  { key: 'audit', label: 'Audit log', icon: <HistoryOutlinedIcon /> },
+] as const;
 
+/**
+ * The administrator console.
+ *
+ * Admins see every teacher, every lesson and every teaching record. Teachers
+ * never reach this route — the guard in App.tsx stops them, and every query
+ * below is unscoped precisely because only admins get here.
+ */
 export function AdminPage() {
+  const [tab, setTab] = useState(0);
+  const directory = useDirectory();
   const { records } = usePlatform();
-  const { toast } = useToast();
 
-  const [classId, setClassId] = useState(CLASSES[0].id);
-  const [subjectId, setSubjectId] = useState('math');
-  const [lessonId, setLessonId] = useState(LESSONS[0].id);
-  const [uploadFor, setUploadFor] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-
-  const cls = getClass(classId);
-  const subjects = useMemo(() => SUBJECTS.filter((s) => cls?.subjectIds.includes(s.id)), [cls]);
-  const effectiveSubject = subjects.some((s) => s.id === subjectId) ? subjectId : subjects[0]?.id ?? 'math';
-  const lessons = useMemo(() => lessonsFor(classId, effectiveSubject), [classId, effectiveSubject]);
-  const effectiveLesson = lessons.some((l) => l.id === lessonId) ? lessonId : lessons[0]?.id;
-
-  const runUpload = (label: string) => {
-    setUploadFor(label);
-    setProgress(0);
-    const timer = window.setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          window.clearInterval(timer);
-          window.setTimeout(() => {
-            setUploadFor(null);
-            toast(`${label} completed. In a live deployment the file would now be in Azure Blob Storage.`);
-          }, 450);
-          return 100;
-        }
-        return p + 12;
-      });
-    }, 180);
-  };
+  const published = directory.lessons.filter((l) => l.published).length;
 
   return (
     <Box>
       <PageHeader
         title="Admin console"
-        subtitle="Manage the content teachers see. This area is restricted to administrators."
+        subtitle="Manage teachers, lessons and content. Restricted to administrators."
         crumbs={[{ label: 'Dashboard', to: '/' }, { label: 'Admin console' }]}
         actions={<Chip label="Administrator view" color="secondary" />}
       />
 
-      {isDemoContent && (
-        <Alert severity="info" sx={{ mb: 2.5 }}>
-          This console is a working prototype of content management. Uploads are simulated and nothing is persisted. With{' '}
-          <code>VITE_CONTENT_SOURCE=azure</code> configured, these actions write to the <code>{config.azureContainer}</code> container.
-        </Alert>
-      )}
-
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, mb: 3 }}>
         {[
-          { label: 'Teachers', value: 1 },
-          { label: 'Classes', value: CLASSES.length },
-          { label: 'Subjects', value: SUBJECTS.length },
-          { label: 'Lessons', value: LESSONS.length },
+          { label: 'Accounts', value: directory.users.length },
+          { label: 'Lessons', value: directory.lessons.length },
+          { label: 'Published', value: published },
+          { label: 'Teaching records', value: records.length },
         ].map((s) => (
           <Card key={s.label} variant="outlined">
             <CardContent>
@@ -106,91 +81,186 @@ export function AdminPage() {
         ))}
       </Box>
 
-      <Card variant="outlined" sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Content management
-          </Typography>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2.5 }}>
-            <TextField select size="small" label="Class" value={classId} onChange={(e) => setClassId(e.target.value)} fullWidth>
-              {CLASSES.map((c) => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.name}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField select size="small" label="Subject" value={effectiveSubject} onChange={(e) => setSubjectId(e.target.value)} fullWidth>
-              {subjects.map((s) => (
-                <MenuItem key={s.id} value={s.id}>
-                  {s.name}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField select size="small" label="Lesson" value={effectiveLesson ?? ''} onChange={(e) => setLessonId(e.target.value)} fullWidth>
-              {lessons.map((l) => (
-                <MenuItem key={l.id} value={l.id}>
-                  {l.title}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Stack>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ borderBottom: 1, borderColor: 'divider', mb: 2.5 }}>
+        {TABS.map((t) => (
+          <Tab key={t.key} label={t.label} icon={t.icon} iconPosition="start" />
+        ))}
+      </Tabs>
 
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' } }}>
-            {ACTIONS.map((a) => (
-              <Card key={a.key} variant="outlined">
-                <CardContent>
-                  <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1, color: 'primary.main' }}>
-                    {a.icon}
-                    <Typography fontWeight={700} color="text.primary">
-                      {a.label}
-                    </Typography>
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', minHeight: 34 }}>
-                    {a.hint}
+      {TABS[tab].key === 'teachers' && <TeachersTab />}
+      {TABS[tab].key === 'lessons' && <LessonsTab />}
+      {TABS[tab].key === 'progress' && <AdminProgress />}
+      {TABS[tab].key === 'records' && <AdminRecords />}
+      {TABS[tab].key === 'audit' && (
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Audit log
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Every sign-in, lesson-plan view, content access, administrative change and detected capture attempt, across all users. This is the
+              record that answers “who had access to this document?”.
+            </Typography>
+            <AuditList />
+          </CardContent>
+        </Card>
+      )}
+    </Box>
+  );
+}
+
+/** Coverage per teacher, which is what an admin actually wants to compare. */
+function AdminProgress() {
+  const directory = useDirectory();
+  const { records } = usePlatform();
+  const teachers = directory.users.filter((u) => u.role === 'TEACHER');
+
+  return (
+    <Stack spacing={2.5}>
+      {teachers.length === 0 && <EmptyState title="No teachers yet" description="Add a teacher account to see teaching progress here." />}
+      {teachers.map((t) => {
+        const assigned = directory.assignmentsFor(t.id);
+        const theirRecords = records.filter((r) => r.userId === t.id);
+        return (
+          <Card key={t.id} variant="outlined">
+            <CardContent>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                <Box>
+                  <Typography variant="h6">{t.fullName}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {t.employeeId} · {assigned.length} class–subject assignments · {theirRecords.length} records
                   </Typography>
-                  <Button size="small" variant="outlined" fullWidth sx={{ mt: 1.5 }} onClick={() => runUpload(a.label)}>
-                    Open
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </Box>
-        </CardContent>
-      </Card>
+                </Box>
+                {!t.active && <Chip size="small" label="Deactivated" />}
+              </Stack>
+              {assigned.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No assignments yet.
+                </Typography>
+              ) : (
+                assigned.map((a) => {
+                  const lessons = filterLessons(directory.lessons, a.classId, a.subjectId);
+                  const subject = directory.subjects.find((s) => s.id === a.subjectId);
+                  return (
+                    <ProgressRow
+                      key={`${a.classId}-${a.subjectId}`}
+                      label={`${a.classId} · ${subject?.name ?? a.subjectId}`}
+                      value={averageCoverage(theirRecords, lessons)}
+                      caption={`${averageCoverage(theirRecords, lessons)}% of ${lessons.length} lessons`}
+                    />
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
+    </Stack>
+  );
+}
 
-      <Card variant="outlined">
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Teaching progress overview
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {TEACHER.name} · {TEACHER.employeeId}
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {CLASSES.map((c) => (
-              <Chip key={c.id} label={`${c.name}: ${averageCoverage(records, c.id)}%`} variant="outlined" />
-            ))}
-          </Stack>
-        </CardContent>
-      </Card>
+function AdminRecords() {
+  const directory = useDirectory();
+  const { records } = usePlatform();
+  const [teacherId, setTeacherId] = useState('all');
+  const [classId, setClassId] = useState('all');
 
-      <Dialog open={Boolean(uploadFor)} maxWidth="xs" fullWidth>
-        <DialogTitle>{uploadFor}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Uploading to {config.azureContainer}/{effectiveLesson}…
-          </Typography>
-          <LinearProgress variant="determinate" value={progress} />
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            {progress}%
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setUploadFor(null)} disabled={progress >= 100}>
-            Cancel
-          </Button>
-        </DialogActions>
-      </Dialog>
+  const rows = useMemo(
+    () =>
+      records
+        .filter((r) => (teacherId === 'all' ? true : r.userId === teacherId))
+        .filter((r) => (classId === 'all' ? true : r.classId === classId))
+        .sort((a, b) => b.dateTaught.localeCompare(a.dateTaught))
+        .slice(0, 200),
+    [records, teacherId, classId],
+  );
+
+  return (
+    <Box>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+        <TextField select size="small" label="Teacher" value={teacherId} onChange={(e) => setTeacherId(e.target.value)} sx={{ minWidth: 200 }}>
+          <MenuItem value="all">All teachers</MenuItem>
+          {directory.users.filter((u) => u.role === 'TEACHER').map((u) => (
+            <MenuItem key={u.id} value={u.id}>
+              {u.fullName}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField select size="small" label="Class" value={classId} onChange={(e) => setClassId(e.target.value)} sx={{ minWidth: 160 }}>
+          <MenuItem value="all">All classes</MenuItem>
+          {directory.classes.map((c) => (
+            <MenuItem key={c.id} value={c.id}>
+              {c.name}
+            </MenuItem>
+          ))}
+        </TextField>
+      </Stack>
+
+      {rows.length === 0 ? (
+        <EmptyState title="No teaching records" description="Records appear here as teachers save what they covered in class." />
+      ) : (
+        <Paper variant="outlined" sx={{ overflowX: 'auto' }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Date</TableCell>
+                <TableCell>Teacher</TableCell>
+                <TableCell>Lesson</TableCell>
+                <TableCell>Class</TableCell>
+                <TableCell align="right">Duration</TableCell>
+                <TableCell>Topics covered</TableCell>
+                <TableCell>Notes</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id} hover>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(r.dateTaught)}</TableCell>
+                  <TableCell>{directory.getUser(r.userId)?.fullName ?? '—'}</TableCell>
+                  <TableCell>{directory.getLesson(r.lessonId)?.title ?? r.lessonId}</TableCell>
+                  <TableCell>{r.classId}</TableCell>
+                  <TableCell align="right">{r.durationMin} min</TableCell>
+                  <TableCell>{r.topics.join(', ')}</TableCell>
+                  <TableCell sx={{ maxWidth: 280 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {r.notes || '—'}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Paper>
+      )}
+      <Divider sx={{ my: 2 }} />
+      <Typography variant="caption" color="text.secondary">
+        Teaching records are append-only. They cannot be edited or deleted here or anywhere else in the portal.
+      </Typography>
+    </Box>
+  );
+}
+
+function AuditList() {
+  const directory = useDirectory();
+  const { activities } = usePlatform();
+  const [userId, setUserId] = useState('all');
+
+  const filtered = useMemo(
+    () => (userId === 'all' ? activities : activities.filter((a) => a.userId === userId)),
+    [activities, userId],
+  );
+
+  return (
+    <Box>
+      <TextField select size="small" label="User" value={userId} onChange={(e) => setUserId(e.target.value)} sx={{ minWidth: 220, mb: 1 }}>
+        <MenuItem value="all">All users</MenuItem>
+        {directory.users.map((u) => (
+          <MenuItem key={u.id} value={u.id}>
+            {u.fullName}
+          </MenuItem>
+        ))}
+      </TextField>
+      <ActivityList activities={filtered.slice(0, 150)} showUser />
     </Box>
   );
 }

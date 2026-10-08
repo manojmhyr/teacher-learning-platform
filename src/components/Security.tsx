@@ -82,7 +82,7 @@ export function ProtectedContent({ children, watermark = true }: { children: Rea
   return (
     <Box ref={ref} className="protected-content" sx={{ position: 'relative', userSelect: 'text' }}>
       {children}
-      {watermark && session && <Watermark name={session.teacher.name} employeeId={session.teacher.employeeId} />}
+      {watermark && session && <Watermark name={session.user.fullName} employeeId={session.user.employeeId} />}
       {obscured && (
         <Box
           sx={{

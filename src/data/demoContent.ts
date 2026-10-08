@@ -133,11 +133,11 @@ function genericPlan(lesson: Lesson): ProtectedDocument {
 
 export function demoPlan(lesson: Lesson): ProtectedDocument {
   seq = 0;
-  return lesson.slug === 'fractions' ? fractionsPlan(lesson) : genericPlan(lesson);
+  return /^introduction to fractions$/i.test(lesson.title) ? fractionsPlan(lesson) : genericPlan(lesson);
 }
 
 export function demoVideos(lesson: Lesson): Video[] {
-  if (lesson.slug === 'fractions') {
+  if (/^introduction to fractions$/i.test(lesson.title)) {
     return [
       { id: `${lesson.id}-v1`, title: 'Introduction to Fractions', description: 'A five-minute classroom introduction using paper strips and everyday objects.', durationSec: 312 },
       { id: `${lesson.id}-v2`, title: 'Fractions in Real Life', description: 'Where fractions show up in food, money and telling the time.', durationSec: 248 },
@@ -161,7 +161,7 @@ export function demoResources(lesson: Lesson): Resource[] {
 }
 
 export function demoQna(lesson: Lesson): QnAItem[] {
-  if (lesson.slug === 'fractions') {
+  if (/^introduction to fractions$/i.test(lesson.title)) {
     return [
       { id: 'q1', question: 'What is a fraction?', answer: 'A fraction represents a part of a whole. The whole is divided into equal parts, and the fraction tells us how many of those parts we are describing.', tags: ['concept'] },
       { id: 'q2', question: 'What is a numerator?', answer: 'The numerator is the number written above the line. It counts how many equal parts are being described. In three quarters, the numerator is three.', tags: ['concept'] },

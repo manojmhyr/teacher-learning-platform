@@ -17,7 +17,12 @@ npm install
 npm run dev            # http://localhost:5173
 ```
 
-Sign in with employee ID **`T1024`** and any password of four or more characters.
+Two demo accounts:
+
+| Role | Employee ID | Password |
+|---|---|---|
+| Teacher (Rahul Sharma) | `T1024` | `teacher-demo-01` |
+| Administrator (Priya Nair) | `A1001` | `admin-portal-01` |
 
 ```bash
 npm run build          # production build into dist/
@@ -55,7 +60,8 @@ src/
   data/                    Catalog, seed history, demo lesson content
   services/
     content/               ← THE SEAM: ContentProvider, mock + Azure implementations
-    authService.ts         Sign in / restore / sign out — swap point for Azure Entra ID
+    lessonKey.ts           Derives lesson ids and Azure folders; validates prefixes
+    password.ts            PBKDF2 hashing and strength rules (demo mode only)
     tokenStore.ts          Access token, in memory only
     secureStore.ts         Keychain / EncryptedSharedPreferences on native; allowlist on web
     http.ts                Fetch wrapper with bearer token and idempotency keys
@@ -64,19 +70,89 @@ src/
   security/
     screenProtection.ts    FLAG_SECURE, privacy screen, capture detection
     leakGuards.ts          Copy, context-menu, print and focus guards
-  context/                 Auth, Platform (records/annotations), Security, Toast
+  context/
+    DirectoryContext.tsx   Users, credentials, assignments, lessons — and the access rule
+    AuthContext.tsx        Sign in, restore, forced password change, idle lock
+    PlatformContext.tsx    Teaching records, audit activity, annotations
+  hooks/useScope.ts        What the signed-in user may see, in one place
   components/              DocumentViewer, VideoPlayer, FractionGame, QnA, Coverage, Security
   layouts/AppLayout.tsx    Sidebar, drawer, app bar, bottom navigation
   pages/                   One file per screen
+    admin/                 Teacher management, assignment grid, lesson builder
 ```
+
+### Roles and access
+
+| | Teacher | Admin |
+|---|---|---|
+| Lessons | Only assigned class + subject, and only published | All |
+| Teaching records | Own only | All teachers |
+| Create teachers, assign subjects | No | Yes |
+| Create lessons, upload content, publish | No | Yes |
+| Audit log | No | Yes |
+
+Access is enforced in the data layer, not the UI. `useScope()` resolves what
+the signed-in user may see, and `DirectoryContext.lessonsForUser()` holds the
+one rule that matters: a teacher sees a lesson only when it is **published**
+and an assignment covers **both** its class and its subject. Typing another
+lesson's URL shows "Not available", and `/admin` shows "Administrators only".
+
+### Accounts and passwords
+
+There is no self-registration. An administrator creates the account, the system
+generates a temporary password to hand over in person, and the teacher is
+forced to set their own before reaching any other screen. Accounts are
+deactivated rather than deleted, so teaching history stays attributable.
+
+In demo mode passwords are stored as PBKDF2 hashes with a per-user salt — never
+plaintext. In production the backend hashes with BCrypt/Argon2id and the
+browser never sees a hash at all.
+
+### Assigning subjects
+
+An admin opens **Admin console → Teachers → assignments** and ticks a grid of
+classes against subjects:
+
+```
+            Mathematics   Science
+Class 5A        [x]         [x]
+Class 6B        [x]         [ ]
+Class 7A        [x]         [ ]
+```
+
+Removing an assignment hides those lessons but never deletes teaching records.
+
+### Lessons and their Azure folders
+
+An admin types a lesson **title**; the system derives the id, the content key
+and the storage folder, and shows the resulting location live while typing:
+
+```
+Admin enters:  Class 5A · Mathematics · "Introduction to Fractions"
+System makes:  lesson id  5a-math-introduction-to-fractions
+               folder     lesson-content/math-introduction-to-fractions/
+```
+
+Nobody types a storage path, which prevents a typo pointing a lesson at an
+empty folder, a lesson reaching another class's content, and path traversal.
+To reuse an existing folder, the admin **picks it from a list** rather than
+typing it. A lesson's folder can be shared across classes (upload one plan that
+serves 5A, 6B and 7A) or kept per-class. Derivation and validation live in
+`src/services/lessonKey.ts`.
+
+New lessons start **unpublished** and are invisible to teachers until an admin
+publishes them, so content can be assembled over several sittings.
 
 ### The content seam
 
 Every screen reads content through one interface, `ContentProvider`:
 
 ```ts
-contentProvider.getLessonContent(lessonId)   // demo today, Azure tomorrow
+contentProvider.getLessonContent(lesson)   // demo today, Azure tomorrow
 ```
+
+Every method takes the whole lesson, not just an id, because the lesson carries
+the folder an admin linked it to.
 
 `src/services/content/index.ts` picks the implementation from `VITE_CONTENT_SOURCE`. Adding a
 third source later (SharePoint, S3, on-prem) means writing one more file.
@@ -142,10 +218,14 @@ compiled into the bundle and readable by anyone.
 
 Not in this repository. The app expects a Spring Boot service providing:
 
-- `POST /auth/login` → access token, expiry, teacher profile
+- `POST /auth/login` → access token, expiry, user profile (with role)
+- `POST /auth/change-password`
 - `GET  /api/content/sas?container=&blob=&ttl=` → short-lived read-only SAS URL
 - `GET  /api/content/sas/health` → 200
 - `POST /teaching-records` (honouring `Idempotency-Key`) → persists an append-only record
+
+Admin endpoints (all role-guarded) for teachers, assignments, lessons, uploads
+and publishing mirror the admin console.
 
 PostgreSQL with an insert-only `teaching_record` table matches the app's model.
 
@@ -153,8 +233,16 @@ PostgreSQL with an insert-only `teaching_record` table matches the app's model.
 
 ## Demo walkthrough
 
-Login → Dashboard → Class 5A → Mathematics → Introduction to Fractions → Lesson Plan (highlight
-text, change pages, search, note the disabled download and the watermark) → Videos → Game →
-Q&A → Coverage (tick topics, add a note, save) → Teaching History → Teaching Progress.
+**As a teacher** (`T1024` / `teacher-demo-01`): Dashboard → Class 5A → Mathematics →
+Introduction to Fractions → Lesson Plan (highlight text, change pages, search, note the
+disabled download and the watermark) → Videos → Game → Q&A → Coverage (tick topics, add a
+note, save) → Teaching History → Teaching Progress.
+
+**As an admin** (`A1001` / `admin-portal-01`): Admin console → Teachers (add one, see the
+temporary password, open the assignment grid) → Lessons & content (add a lesson and watch the
+Azure folder derive from the title, upload, publish) → Teaching records → Audit log.
+
+Worth showing together: create a lesson as the admin, then refresh the teacher's lesson list —
+it is absent until published.
 
 **Settings → Reset demo data** restores everything before a presentation.

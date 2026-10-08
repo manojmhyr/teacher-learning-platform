@@ -71,7 +71,10 @@ export function DocumentViewer({ document: doc, allowAnnotations = true, label =
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const page = doc.pages[Math.min(pageIdx, doc.pages.length - 1)];
-  const docAnnotations = useMemo(() => annotations.filter((a) => a.documentId === doc.id), [annotations, doc.id]);
+  const docAnnotations = useMemo(
+    () => annotations.filter((a) => a.documentId === doc.id && a.userId === session?.user.id),
+    [annotations, doc.id, session],
+  );
 
   useEffect(() => {
     setPageIdx(0);
@@ -119,10 +122,11 @@ export function DocumentViewer({ document: doc, allowAnnotations = true, label =
     const end = start + selected.length;
     if (end > blockText.length) return;
 
-    addAnnotation({ documentId: doc.id, pageNumber: page.number, blockId, start, end });
+    if (!session) return;
+    addAnnotation({ userId: session.user.id, documentId: doc.id, pageNumber: page.number, blockId, start, end });
     sel.removeAllRanges();
     toast('Highlight saved to your personal annotations.');
-  }, [allowAnnotations, eraseMode, addAnnotation, doc.id, page.number, toast]);
+  }, [allowAnnotations, eraseMode, addAnnotation, doc.id, page.number, toast, session]);
 
   /**
    * Splits a block's text into render segments, merging overlapping highlights
@@ -356,7 +360,7 @@ export function DocumentViewer({ document: doc, allowAnnotations = true, label =
               position: 'relative',
             }}
           >
-            {session && <Watermark name={session.teacher.name} employeeId={session.teacher.employeeId} />}
+            {session && <Watermark name={session.user.fullName} employeeId={session.user.employeeId} />}
             <Stack direction="row" justifyContent="space-between" sx={{ mb: 3, color: 'text.secondary' }}>
               <Typography variant="caption">{doc.subtitle}</Typography>
               <Typography variant="caption">Internal use only</Typography>

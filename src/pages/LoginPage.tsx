@@ -20,14 +20,12 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined';
 import { useAuth } from '@/context/AuthContext';
-import { usePlatform } from '@/context/PlatformContext';
 import { LogoMark } from '@/components/common';
 import { config, isDemoContent } from '@/config/env';
 import { serif, tokens } from '@/theme/theme';
 
 export function LoginPage() {
   const { session, restoring, signIn, lastSignOutReason } = useAuth();
-  const { log } = usePlatform();
   const navigate = useNavigate();
 
   const [identifier, setIdentifier] = useState('');
@@ -48,7 +46,6 @@ export function LoginPage() {
     setError('');
     try {
       await signIn(identifier, password);
-      log('login', 'Signed in to the Teacher Portal');
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed. Please try again.');
@@ -195,8 +192,14 @@ export function LoginPage() {
               <Typography variant="body2" fontWeight={600}>
                 Demo build
               </Typography>
-              <Typography variant="caption">
-                Sign in with <strong>T1024</strong> and any password of four or more characters. Lesson content is served from built-in demo data.
+              <Typography variant="caption" component="div">
+                Two demo accounts — lesson content is served from built-in demo data.
+              </Typography>
+              <Typography variant="caption" component="div" sx={{ mt: 0.75, fontFamily: 'monospace' }}>
+                Teacher · T1024 / teacher-demo-01
+              </Typography>
+              <Typography variant="caption" component="div" sx={{ fontFamily: 'monospace' }}>
+                Admin · A1001 / admin-portal-01
               </Typography>
             </Alert>
           )}

@@ -7,23 +7,26 @@ import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { CLASSES, SUBJECTS, getClass } from '@/data/catalog';
-import { usePlatform } from '@/context/PlatformContext';
-import { averageCoverage, chapters, statusCounts } from '@/services/progressService';
+import { useScope } from '@/hooks/useScope';
+import { averageCoverage, chapters, filterLessons, statusCounts } from '@/services/progressService';
 import { PageHeader, ProgressRing, ProgressRow } from '@/components/common';
 
 export function ProgressPage() {
-  const { records } = usePlatform();
-  const [classId, setClassId] = useState(CLASSES[0].id);
-  const [subjectId, setSubjectId] = useState('math');
+  const { lessons, records, classes, subjects } = useScope();
+  const [classId, setClassId] = useState(classes[0]?.id ?? '');
+  const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? '');
 
-  const cls = getClass(classId);
-  const availableSubjects = useMemo(() => SUBJECTS.filter((s) => cls?.subjectIds.includes(s.id)), [cls]);
-  const effectiveSubject = availableSubjects.some((s) => s.id === subjectId) ? subjectId : availableSubjects[0]?.id ?? 'math';
+  const cls = classes.find((c) => c.id === classId) ?? classes[0];
+  const availableSubjects = useMemo(
+    () => subjects.filter((s) => cls?.subjectIds.includes(s.id) && lessons.some((l) => l.classId === cls.id && l.subjectId === s.id)),
+    [subjects, cls, lessons],
+  );
+  const effectiveSubject = availableSubjects.some((s) => s.id === subjectId) ? subjectId : availableSubjects[0]?.id ?? '';
+  const scoped = useMemo(() => filterLessons(lessons, cls?.id, effectiveSubject), [lessons, cls, effectiveSubject]);
 
-  const counts = useMemo(() => statusCounts(records, classId, effectiveSubject), [records, classId, effectiveSubject]);
-  const grouped = useMemo(() => chapters(records, classId, effectiveSubject), [records, classId, effectiveSubject]);
-  const overall = useMemo(() => averageCoverage(records, classId, effectiveSubject), [records, classId, effectiveSubject]);
+  const counts = useMemo(() => statusCounts(records, scoped), [records, scoped]);
+  const grouped = useMemo(() => chapters(records, scoped), [records, scoped]);
+  const overall = useMemo(() => averageCoverage(records, scoped), [records, scoped]);
 
   return (
     <Box>
@@ -35,7 +38,7 @@ export function ProgressPage() {
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mb: 2.5 }}>
         <TextField select size="small" label="Class" value={classId} onChange={(e) => setClassId(e.target.value)} sx={{ minWidth: 180 }}>
-          {CLASSES.map((c) => (
+          {classes.map((c) => (
             <MenuItem key={c.id} value={c.id}>
               {c.name}
             </MenuItem>
@@ -76,7 +79,7 @@ export function ProgressPage() {
             <ProgressRing value={overall} size={88} />
             <Box>
               <Typography variant="h6">
-                {cls?.name} · {SUBJECTS.find((s) => s.id === effectiveSubject)?.name}
+                {cls?.name} · {subjects.find((s) => s.id === effectiveSubject)?.name}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Average coverage across {counts.total} lessons in this subject.

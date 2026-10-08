@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { enableScreenProtection, initCaptureDetection, onScreenCaptureAttempt, type ScreenProtectionState } from '@/security/screenProtection';
 import { guardPrint, installGlobalGuards } from '@/security/leakGuards';
 import { usePlatform } from '@/context/PlatformContext';
+import { useAuth } from '@/context/AuthContext';
 
 interface SecurityValue {
   protection: ScreenProtectionState;
@@ -17,6 +18,7 @@ const SecurityContext = createContext<SecurityValue | null>(null);
  */
 export function SecurityProvider({ children }: { children: ReactNode }) {
   const { log } = usePlatform();
+  const { session } = useAuth();
   const [protection, setProtection] = useState<ScreenProtectionState>({
     level: 'deterrent-only',
     platform: 'web',
@@ -35,7 +37,7 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
     const removeDetection = initCaptureDetection();
     const removeListener = onScreenCaptureAttempt(() => {
       setCaptureAttempts((n) => n + 1);
-      log('view_plan', 'Screen capture attempt detected on protected content');
+      if (session) log(session.user.id, 'security', 'Screen capture attempt detected on protected content');
     });
 
     return () => {
@@ -45,7 +47,7 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
       removeDetection();
       removeListener();
     };
-  }, [log]);
+  }, [log, session]);
 
   const value = useMemo(() => ({ protection, captureAttempts }), [protection, captureAttempts]);
   return <SecurityContext.Provider value={value}>{children}</SecurityContext.Provider>;

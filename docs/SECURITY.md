@@ -85,6 +85,37 @@ leaked content **traceable** and **short-lived**:
 
 ---
 
+## Who can see what
+
+Access is enforced in the data layer, not by hiding menu items:
+
+| | Teacher | Admin |
+|---|---|---|
+| Lessons | Only where an assignment covers the class **and** subject, and the lesson is published | All |
+| Teaching records | Own only | All teachers |
+| Admin console | Blocked | Yes |
+| Audit log | No | Yes |
+
+`DirectoryContext.lessonsForUser()` holds the single access rule; `useScope()`
+applies it to every page. A teacher who types another lesson's URL gets "Not
+available", and `/admin` gets "Administrators only". The smoke test asserts both.
+
+**On the backend, repeat the check.** Client-side scoping decides what is shown;
+the server must decide what is served. Every lesson request and every SAS mint
+must verify the teacher's assignment again before returning anything.
+
+### Accounts
+
+Accounts are created by an administrator — there is no self-registration. A
+temporary password is handed over in person and must be changed before the
+teacher reaches any other screen. Accounts are deactivated, never deleted, so
+teaching records stay attributable; a deactivated account cannot sign in, and a
+restored session re-reads the account so deactivation takes effect immediately.
+
+Demo-mode passwords are PBKDF2 hashes with a per-user salt, so no plaintext
+password exists even locally. Production hashes with BCrypt/Argon2id on the
+backend and the browser never sees a hash.
+
 ## Preventing data leakage in the app
 
 | Risk | Control | Where |
@@ -96,6 +127,8 @@ leaked content **traceable** and **short-lived**:
 | Token theft from storage | Access token kept **in memory only**, never localStorage | `src/services/tokenStore.ts` |
 | Content left on a shared device | Logout wipes all app storage; 20-minute idle sign-out | `authService.signOut`, `AuthContext` |
 | Secrets in the bundle | No account keys in any `VITE_` variable; SAS minted server-side | `docs/AZURE_SETUP.md` |
+| A lesson reaching another folder | Storage paths derived, never typed; prefix re-validated before every request | `src/services/lessonKey.ts` |
+| Unfinished content leaking | New lessons are unpublished and invisible to teachers until released | admin console |
 | Accidental persistence | Browser storage has an **allowlist**; anything else is refused | `src/services/secureStore.ts` |
 | XSS pulling content out | Strict CSP: `connect-src` limited to the API and blob origins | `vite.config.ts` |
 | Clickjacking | `frame-ancestors 'none'` + `X-Frame-Options: DENY` | emitted host config |

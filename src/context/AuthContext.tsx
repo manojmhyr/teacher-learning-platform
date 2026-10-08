@@ -1,54 +1,147 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { IDLE_TIMEOUT_MS, authService, type Session } from '@/services/authService';
+import { config } from '@/config/env';
+import { apiPost } from '@/services/http';
+import { secureStore } from '@/services/secureStore';
+import { clearAccessToken, setAccessToken } from '@/services/tokenStore';
+import { verifyPassword } from '@/services/password';
+import { useDirectory } from '@/context/DirectoryContext';
+import type { User } from '@/types';
+
+/** Inactivity window — protected content should not sit open on a staffroom desk. */
+export const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+const SESSION_TTL_SECONDS = 8 * 60 * 60;
+const SESSION_KEY = 'session';
+
+export interface Session {
+  user: User;
+  issuedAt: string;
+  expiresAt: string;
+}
 
 interface AuthValue {
   session: Session | null;
-  /** False until a stored session has been checked, so the app does not flash the login screen. */
   restoring: boolean;
+  isAdmin: boolean;
+  /** True while the user must set a new password before using the portal. */
+  mustChangePassword: boolean;
   signIn: (identifier: string, password: string) => Promise<void>;
+  changePassword: (current: string, next: string) => Promise<void>;
   signOut: (reason?: 'user' | 'idle') => Promise<void>;
-  /** Set when the last sign-out was forced by inactivity, so Login can explain why. */
   lastSignOutReason: 'user' | 'idle' | null;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const directory = useDirectory();
   const [session, setSession] = useState<Session | null>(null);
   const [restoring, setRestoring] = useState(true);
   const [lastSignOutReason, setLastSignOutReason] = useState<'user' | 'idle' | null>(null);
   const idleTimer = useRef<number | undefined>(undefined);
 
   // Re-establish an existing session on load, so a refresh does not sign a
-  // teacher out in the middle of a lesson.
+  // teacher out mid-lesson. The stored descriptor holds no token.
   useEffect(() => {
+    if (!directory.ready) return;
     let alive = true;
-    void authService.restore().then((restored) => {
+    (async () => {
+      const stored = await secureStore.get<Session | null>(SESSION_KEY, null);
       if (!alive) return;
-      if (restored) setSession(restored);
+      if (stored && new Date(stored.expiresAt).getTime() > Date.now()) {
+        // Re-read the user so a role change or deactivation takes effect at once.
+        const current = directory.getUser(stored.user.id);
+        if (current && current.active) {
+          const remaining = Math.floor((new Date(stored.expiresAt).getTime() - Date.now()) / 1000);
+          setAccessToken(`restored.${Date.now()}`, remaining);
+          setSession({ ...stored, user: current });
+        } else {
+          await secureStore.remove(SESSION_KEY);
+        }
+      }
       setRestoring(false);
-    });
+    })();
     return () => {
       alive = false;
     };
-  }, []);
+    // Only on first ready — later directory changes must not re-run restore.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directory.ready]);
 
   const signOut = useCallback(async (reason: 'user' | 'idle' = 'user') => {
-    await authService.signOut();
+    clearAccessToken();
+    await secureStore.remove(SESSION_KEY);
+    // Personal annotations and bookmarks are cleared too, so a shared device
+    // retains nothing after sign-out.
+    await secureStore.remove('annotations');
+    await secureStore.remove('bookmarks');
     setSession(null);
     setLastSignOutReason(reason);
   }, []);
 
-  const signIn = useCallback(async (identifier: string, password: string) => {
-    const next = await authService.signIn(identifier, password);
-    setSession(next);
-    setLastSignOutReason(null);
-  }, []);
+  const signIn = useCallback(
+    async (identifier: string, password: string) => {
+      if (config.apiBaseUrl) {
+        const res = await apiPost<{ accessToken: string; expiresIn: number; user: User }>('/auth/login', {
+          body: { identifier, password },
+        });
+        setAccessToken(res.accessToken, res.expiresIn);
+        const now = new Date();
+        const next: Session = {
+          user: res.user,
+          issuedAt: now.toISOString(),
+          expiresAt: new Date(now.getTime() + res.expiresIn * 1000).toISOString(),
+        };
+        await secureStore.set(SESSION_KEY, next);
+        setSession(next);
+        return;
+      }
 
-  /**
-   * Idle lock. Protected lesson content should not stay open on an unattended
-   * laptop in a staffroom, so an inactive session is signed out.
-   */
+      // Demo mode: verify against the local directory.
+      await new Promise((r) => setTimeout(r, 500));
+      const user = directory.findByIdentifier(identifier);
+      const credential = user ? directory.credentialFor(user.id) : undefined;
+      const ok = Boolean(user && credential && (await verifyPassword(password, credential.passwordHash)));
+
+      // Same message either way — a different one for "no such user" would
+      // turn this screen into an account enumerator.
+      if (!ok || !user) throw new Error('Employee ID or password is incorrect.');
+      if (!user.active) throw new Error('This account has been deactivated. Contact your administrator.');
+
+      const now = new Date();
+      setAccessToken(`demo.${now.getTime()}`, SESSION_TTL_SECONDS);
+      const next: Session = {
+        user,
+        issuedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString(),
+      };
+      await secureStore.set(SESSION_KEY, next);
+      directory.markLogin(user.id);
+      setSession(next);
+      setLastSignOutReason(null);
+    },
+    [directory],
+  );
+
+  const changePassword = useCallback(
+    async (current: string, next: string) => {
+      if (!session) throw new Error('Not signed in.');
+      if (config.apiBaseUrl) {
+        await apiPost('/auth/change-password', { body: { current, next } });
+      } else {
+        const credential = directory.credentialFor(session.user.id);
+        if (!credential || !(await verifyPassword(current, credential.passwordHash))) {
+          throw new Error('Your current password is incorrect.');
+        }
+        await directory.setPassword(session.user.id, next, false);
+      }
+      const updated = { ...session, user: { ...session.user, mustChange: false } };
+      await secureStore.set(SESSION_KEY, updated);
+      setSession(updated);
+    },
+    [session, directory],
+  );
+
+  // Idle lock.
   useEffect(() => {
     if (!session) return;
     const reset = () => {
@@ -64,10 +157,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [session, signOut]);
 
-  const value = useMemo(
-    () => ({ session, restoring, signIn, signOut, lastSignOutReason }),
-    [session, restoring, signIn, signOut, lastSignOutReason],
+  const value = useMemo<AuthValue>(
+    () => ({
+      session,
+      restoring: restoring || !directory.ready,
+      isAdmin: session?.user.role === 'ADMIN',
+      mustChangePassword: Boolean(session?.user.mustChange),
+      signIn,
+      changePassword,
+      signOut,
+      lastSignOutReason,
+    }),
+    [session, restoring, directory.ready, signIn, changePassword, signOut, lastSignOutReason],
   );
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

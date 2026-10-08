@@ -16,36 +16,44 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
-import { CLASSES, SUBJECTS } from '@/data/catalog';
 import { useAuth } from '@/context/AuthContext';
 import { usePlatform } from '@/context/PlatformContext';
 import { useSecurity } from '@/context/SecurityContext';
 import { useToast } from '@/context/ToastContext';
+import { useScope } from '@/hooks/useScope';
 import { contentProvider } from '@/services/content';
+import { checkPasswordStrength } from '@/services/password';
 import { config, isDemoContent } from '@/config/env';
 import { EmptyState, PageHeader } from '@/components/common';
 import { fmtDate } from '@/utils/format';
 
+function initials(name: string) {
+  return name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+}
+
 export function ProfilePage() {
   const { session } = useAuth();
+  const { classes, subjects } = useScope();
   if (!session) return null;
-  const t = session.teacher;
+  const u = session.user;
+
   return (
     <Box>
       <PageHeader title="Profile" crumbs={[{ label: 'Dashboard', to: '/' }, { label: 'Profile' }]} />
       <Card variant="outlined">
         <CardContent>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} alignItems={{ sm: 'center' }}>
-            <Avatar sx={{ width: 76, height: 76, bgcolor: 'primary.main', fontSize: 26, fontWeight: 800 }}>
-              {t.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-            </Avatar>
+            <Avatar sx={{ width: 76, height: 76, bgcolor: 'primary.main', fontSize: 26, fontWeight: 800 }}>{initials(u.fullName)}</Avatar>
             <Box>
-              <Typography variant="h5" fontWeight={700}>
-                {t.name}
-              </Typography>
-              <Typography color="text.secondary">{t.role}</Typography>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="h5" fontWeight={700}>
+                  {u.fullName}
+                </Typography>
+                {u.role === 'ADMIN' && <Chip size="small" color="secondary" label="Administrator" />}
+              </Stack>
+              <Typography color="text.secondary">{u.title}</Typography>
               <Typography variant="body2" color="text.secondary">
-                Employee ID {t.employeeId} · {t.email}
+                Employee ID {u.employeeId} · {u.email}
               </Typography>
             </Box>
           </Stack>
@@ -55,38 +63,129 @@ export function ProfilePage() {
           <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
             <Box>
               <Typography variant="subtitle2" gutterBottom>
-                Classes
+                My classes
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {t.classIds.map((id) => (
-                  <Chip key={id} label={CLASSES.find((c) => c.id === id)?.name ?? id} component={RouterLink} to={`/classes/${id}`} clickable />
-                ))}
+                {classes.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    None assigned
+                  </Typography>
+                ) : (
+                  classes.map((c) => <Chip key={c.id} label={c.name} component={RouterLink} to={`/classes/${c.id}`} clickable />)
+                )}
               </Stack>
             </Box>
             <Box>
               <Typography variant="subtitle2" gutterBottom>
-                Subjects
+                My subjects
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {t.subjectIds.map((id) => (
-                  <Chip key={id} label={SUBJECTS.find((s) => s.id === id)?.name ?? id} variant="outlined" />
-                ))}
+                {subjects.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    None assigned
+                  </Typography>
+                ) : (
+                  subjects.map((s) => <Chip key={s.id} label={s.name} variant="outlined" />)
+                )}
               </Stack>
             </Box>
           </Box>
 
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>
-            Joined {fmtDate(t.joinedOn)}. Profile details are managed by your school administrator.
+            Account created {fmtDate(u.createdAt)}
+            {u.lastLoginAt ? ` · Last signed in ${fmtDate(u.lastLoginAt)}` : ''}. Your classes, subjects and profile details are managed by your
+            administrator.
           </Typography>
         </CardContent>
       </Card>
+
+      <ChangePasswordCard />
     </Box>
+  );
+}
+
+/** Password change, reused by the forced-change screen. */
+export function ChangePasswordCard({ forced = false }: { forced?: boolean }) {
+  const { session, changePassword } = useAuth();
+  const { toast } = useToast();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [errors, setErrors] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const strength = checkPasswordStrength(next, session?.user.employeeId);
+    const problems = [...strength.errors];
+    if (next !== confirm) problems.push('The two new passwords do not match.');
+    if (next === current) problems.push('Choose a password different from your current one.');
+    setErrors(problems);
+    if (problems.length) return;
+
+    setBusy(true);
+    try {
+      await changePassword(current, next);
+      setCurrent('');
+      setNext('');
+      setConfirm('');
+      toast('Password changed.');
+    } catch (err) {
+      setErrors([err instanceof Error ? err.message : 'Could not change the password.']);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card variant="outlined" sx={{ mt: forced ? 0 : 2.5 }}>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          {forced ? 'Set your password' : 'Change password'}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {forced
+            ? 'Your administrator gave you a temporary password. Choose your own before continuing.'
+            : 'Use at least 10 characters. If you forget it, your administrator can issue a new temporary password.'}
+        </Typography>
+
+        <Stack spacing={2} sx={{ maxWidth: 420 }}>
+          <TextField
+            label={forced ? 'Temporary password' : 'Current password'}
+            type="password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            autoComplete="current-password"
+            fullWidth
+          />
+          <TextField label="New password" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" fullWidth />
+          <TextField
+            label="Confirm new password"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="new-password"
+            fullWidth
+          />
+          {errors.length > 0 && (
+            <Alert severity="error">
+              {errors.map((e) => (
+                <div key={e}>{e}</div>
+              ))}
+            </Alert>
+          )}
+          <Button variant="contained" onClick={() => void submit()} disabled={busy || !current || !next}>
+            {busy ? 'Saving…' : 'Update password'}
+          </Button>
+        </Stack>
+      </CardContent>
+    </Card>
   );
 }
 
 export function SettingsPage() {
   const { colorPref, setColorPref, resetDemo } = usePlatform();
   const { protection, captureAttempts } = useSecurity();
+  const { isAdmin } = useAuth();
   const { toast } = useToast();
   const [health, setHealth] = useState<{ ok: boolean; detail: string } | null>(null);
 
@@ -171,19 +270,22 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        {isDemoContent && (
+        <ChangePasswordCard />
+
+        {isDemoContent && isAdmin && (
           <Card variant="outlined">
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Demo data
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Restores teaching records, activity and highlights to their original state. Useful before a client presentation.
+                Restores teachers, assignments, lessons, teaching records and highlights to their original state. Useful before a client
+                presentation. Any accounts or lessons you created will be removed.
               </Typography>
               <Button
                 variant="outlined"
                 onClick={() => {
-                  resetDemo();
+                  void resetDemo();
                   toast('Demo data reset.');
                 }}
               >
@@ -197,11 +299,38 @@ export function SettingsPage() {
   );
 }
 
+export function ForcedPasswordChangePage() {
+  const { session } = useAuth();
+  return (
+    <Box sx={{ maxWidth: 560, mx: 'auto', py: 4 }}>
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        Welcome{session ? `, ${session.user.fullName.split(' ')[0]}` : ''}. You must set your own password before using the portal.
+      </Alert>
+      <ChangePasswordCard forced />
+    </Box>
+  );
+}
+
 export function NotFoundPage() {
   return (
     <EmptyState
-      title="Page not found"
-      description="The page you were looking for does not exist or you do not have access to it."
+      title="Not available"
+      description="This page does not exist, or it covers a class or subject you are not assigned to."
+      action={
+        <Button component={RouterLink} to="/" variant="contained">
+          Back to dashboard
+        </Button>
+      }
+    />
+  );
+}
+
+/** Shown when a teacher reaches an admin-only route. */
+export function ForbiddenPage() {
+  return (
+    <EmptyState
+      title="Administrators only"
+      description="This area is restricted to portal administrators. If you need something changed, contact your administrator."
       action={
         <Button component={RouterLink} to="/" variant="contained">
           Back to dashboard

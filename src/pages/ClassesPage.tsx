@@ -11,27 +11,40 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import MeetingRoomOutlinedIcon from '@mui/icons-material/MeetingRoomOutlined';
 import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
-import { CLASSES, SUBJECTS, getClass, getSubject, lessonsFor } from '@/data/catalog';
-import { usePlatform } from '@/context/PlatformContext';
-import { averageCoverage, lessonCoverage } from '@/services/progressService';
-import { PageHeader, ProgressRow, SubjectIcon } from '@/components/common';
+import { getClass } from '@/data/catalog';
+import { useScope, useSubjectsForClass } from '@/hooks/useScope';
+import { averageCoverage, filterLessons, lessonCoverage } from '@/services/progressService';
+import { EmptyState, PageHeader, ProgressRow, SubjectIcon } from '@/components/common';
 import { fmtDate } from '@/utils/format';
 
 export function ClassesPage() {
-  const { records } = usePlatform();
+  const { lessons, records, classes, subjects } = useScope();
+
+  if (classes.length === 0) {
+    return (
+      <Box>
+        <PageHeader title="My classes" crumbs={[{ label: 'Dashboard', to: '/' }, { label: 'My classes' }]} />
+        <EmptyState
+          title="No classes assigned yet"
+          description="Your administrator has not assigned you to any class and subject. Once they do, your lessons will appear here."
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box>
       <PageHeader
         title="My classes"
-        subtitle="Classes assigned to you for the 2026–27 academic year."
+        subtitle="Classes you are assigned to for the 2026–27 academic year."
         crumbs={[{ label: 'Dashboard', to: '/' }, { label: 'My classes' }]}
       />
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-        {CLASSES.map((cls) => {
-          const lessons = lessonsFor(cls.id);
-          const coverage = averageCoverage(records, cls.id);
+        {classes.map((cls) => {
+          const classLessons = filterLessons(lessons, cls.id);
+          const coverage = averageCoverage(records, classLessons);
           const last = records.filter((r) => r.classId === cls.id).map((r) => r.dateTaught).sort().pop();
+          const mySubjects = subjects.filter((s) => cls.subjectIds.includes(s.id) && classLessons.some((l) => l.subjectId === s.id));
           return (
             <Card key={cls.id} variant="outlined">
               <CardContent>
@@ -48,8 +61,8 @@ export function ClassesPage() {
                 </Stack>
 
                 <Stack direction="row" spacing={0.75} sx={{ my: 1.5 }} flexWrap="wrap" useFlexGap>
-                  {cls.subjectIds.map((sid) => (
-                    <Chip key={sid} size="small" variant="outlined" label={getSubject(sid)?.name} icon={<SubjectIcon icon={getSubject(sid)!.icon} fontSize="small" />} />
+                  {mySubjects.map((s) => (
+                    <Chip key={s.id} size="small" variant="outlined" label={s.name} icon={<SubjectIcon icon={s.icon} fontSize="small" />} />
                   ))}
                 </Stack>
 
@@ -69,7 +82,7 @@ export function ClassesPage() {
                 </Stack>
 
                 <Divider sx={{ mb: 1 }} />
-                <ProgressRow label={`${lessons.length} lessons`} value={coverage} caption={`${coverage}% complete`} />
+                <ProgressRow label={`${classLessons.length} lessons`} value={coverage} caption={`${coverage}% complete`} />
                 {last && (
                   <Typography variant="caption" color="text.secondary">
                     Last activity: {fmtDate(last)}
@@ -88,63 +101,67 @@ export function ClassesPage() {
   );
 }
 
-/** Subjects for one class, or all subjects when reached from the sidebar. */
+/** Subjects for one class, or every subject you teach when reached from the sidebar. */
 export function SubjectsPage() {
   const { classId } = useParams();
-  const { records } = usePlatform();
+  const { lessons, records, subjects: allMine } = useScope();
   const cls = getClass(classId);
-  const subjects = cls ? SUBJECTS.filter((s) => cls.subjectIds.includes(s.id)) : SUBJECTS;
+  const classSubjects = useSubjectsForClass(classId);
+  const subjects = cls ? classSubjects : allMine;
 
   return (
     <Box>
       <PageHeader
         title={cls ? `${cls.name} — subjects` : 'Subjects'}
-        subtitle={cls ? `Subjects you teach to ${cls.name}.` : 'Subjects assigned to you across all classes.'}
+        subtitle={cls ? `Subjects you teach to ${cls.name}.` : 'Subjects assigned to you across all your classes.'}
         crumbs={
           cls
             ? [{ label: 'Dashboard', to: '/' }, { label: 'My classes', to: '/classes' }, { label: cls.name }]
             : [{ label: 'Dashboard', to: '/' }, { label: 'Subjects' }]
         }
       />
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-        {subjects.map((subject) => {
-          const scopeClass = cls?.id;
-          const lessons = lessonsFor(scopeClass, subject.id);
-          const coverage = averageCoverage(records, scopeClass, subject.id);
-          const completed = lessons.filter((l) => lessonCoverage(records, l.id) >= 100).length;
-          return (
-            <Card key={subject.id} variant="outlined">
-              <CardContent>
-                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
-                  <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}>
-                    <SubjectIcon icon={subject.icon} />
-                  </Box>
-                  <Box>
-                    <Typography variant="h6">{subject.name}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {subject.chapters.length} chapters · {lessons.length} lessons
-                    </Typography>
-                  </Box>
-                </Stack>
-                <ProgressRow label="Coverage" value={coverage} />
-                <Typography variant="caption" color="text.secondary">
-                  {completed} of {lessons.length} lessons fully covered
-                </Typography>
-                <Button
-                  component={RouterLink}
-                  to={cls ? `/classes/${cls.id}/${subject.id}` : `/lessons?subject=${subject.id}`}
-                  variant="contained"
-                  fullWidth
-                  endIcon={<ArrowForwardIcon />}
-                  sx={{ mt: 2 }}
-                >
-                  View lessons
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </Box>
+      {subjects.length === 0 ? (
+        <EmptyState title="No subjects assigned" description="Your administrator has not assigned you a subject for this class yet." />
+      ) : (
+        <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+          {subjects.map((subject) => {
+            const subjectLessons = filterLessons(lessons, cls?.id, subject.id);
+            const coverage = averageCoverage(records, subjectLessons);
+            const completed = subjectLessons.filter((l) => lessonCoverage(records, l) >= 100).length;
+            return (
+              <Card key={subject.id} variant="outlined">
+                <CardContent>
+                  <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
+                    <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'action.hover', color: 'primary.main', display: 'grid', placeItems: 'center' }}>
+                      <SubjectIcon icon={subject.icon} />
+                    </Box>
+                    <Box>
+                      <Typography variant="h6">{subject.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {new Set(subjectLessons.map((l) => l.chapter)).size} chapters · {subjectLessons.length} lessons
+                      </Typography>
+                    </Box>
+                  </Stack>
+                  <ProgressRow label="Coverage" value={coverage} />
+                  <Typography variant="caption" color="text.secondary">
+                    {completed} of {subjectLessons.length} lessons fully covered
+                  </Typography>
+                  <Button
+                    component={RouterLink}
+                    to={cls ? `/classes/${cls.id}/${subject.id}` : `/lessons?subject=${subject.id}`}
+                    variant="contained"
+                    fullWidth
+                    endIcon={<ArrowForwardIcon />}
+                    sx={{ mt: 2 }}
+                  >
+                    View lessons
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </Box>
+      )}
     </Box>
   );
 }

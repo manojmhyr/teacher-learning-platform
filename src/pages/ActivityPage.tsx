@@ -11,12 +11,16 @@ import LoginOutlinedIcon from '@mui/icons-material/LoginOutlined';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import SportsEsportsOutlinedIcon from '@mui/icons-material/SportsEsportsOutlined';
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
-import type { Activity } from '@/types';
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
+import type { Activity, ActivityKind } from '@/types';
 import { usePlatform } from '@/context/PlatformContext';
+import { useAuth } from '@/context/AuthContext';
+import { useDirectory } from '@/context/DirectoryContext';
 import { EmptyState, PageHeader } from '@/components/common';
 import { dayLabel, fmtTime } from '@/utils/format';
 
-const ICONS: Record<Activity['kind'], React.ReactNode> = {
+const ICONS: Record<ActivityKind, React.ReactNode> = {
   login: <LoginOutlinedIcon fontSize="small" />,
   view_plan: <DescriptionOutlinedIcon fontSize="small" />,
   watch_video: <PlayCircleOutlineIcon fontSize="small" />,
@@ -24,10 +28,13 @@ const ICONS: Record<Activity['kind'], React.ReactNode> = {
   note: <BorderColorOutlinedIcon fontSize="small" />,
   game: <SportsEsportsOutlinedIcon fontSize="small" />,
   resource: <FolderOutlinedIcon fontSize="small" />,
+  admin: <SettingsOutlinedIcon fontSize="small" />,
+  security: <ShieldOutlinedIcon fontSize="small" />,
 };
 
 /** Timeline grouped into Today / Yesterday / date, reused on the dashboard. */
-export function ActivityList({ activities, dense = false }: { activities: Activity[]; dense?: boolean }) {
+export function ActivityList({ activities, dense = false, showUser = false }: { activities: Activity[]; dense?: boolean; showUser?: boolean }) {
+  const directory = useDirectory();
   const groups = useMemo(() => {
     const map = new Map<string, Activity[]>();
     for (const a of activities) {
@@ -54,6 +61,11 @@ export function ActivityList({ activities, dense = false }: { activities: Activi
               <Box sx={{ color: 'primary.main', mt: '2px' }}>{ICONS[a.kind]}</Box>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="body2">{a.text}</Typography>
+                {showUser && (
+                  <Typography variant="caption" color="text.secondary">
+                    {directory.getUser(a.userId)?.fullName ?? 'Unknown user'}
+                  </Typography>
+                )}
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
                 {fmtTime(a.at)}
@@ -67,7 +79,9 @@ export function ActivityList({ activities, dense = false }: { activities: Activi
 }
 
 export function ActivityPage() {
-  const { activities } = usePlatform();
+  const { activitiesFor } = usePlatform();
+  const { session } = useAuth();
+  const activities = session ? activitiesFor(session.user.id) : [];
   return (
     <Box>
       <PageHeader

@@ -21,7 +21,8 @@ import CheckIcon from '@mui/icons-material/Check';
 import HistoryIcon from '@mui/icons-material/History';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import type { Lesson, TeachingRecord } from '@/types';
-import { CLASSES } from '@/data/catalog';
+import { useAuth } from '@/context/AuthContext';
+import { useDirectory } from '@/context/DirectoryContext';
 import { usePlatform } from '@/context/PlatformContext';
 import { useToast } from '@/context/ToastContext';
 import { buildRecord, saveRecord, validateRecord } from '@/services/recordService';
@@ -37,7 +38,11 @@ import { fmtDate, todayISO } from '@/utils/format';
  * offers what has not yet been covered.
  */
 export function Coverage({ lesson }: { lesson: Lesson }) {
-  const { records, addRecord, log } = usePlatform();
+  const { records: allRecords, addRecord, log } = usePlatform();
+  const { session } = useAuth();
+  const { classes } = useDirectory();
+  // A teacher only ever sees and adds to their own history.
+  const records = useMemo(() => allRecords.filter((r) => r.userId === session?.user.id), [allRecords, session]);
   const { toast } = useToast();
 
   const already = useMemo(() => coveredTopics(records, lesson.id), [records, lesson.id]);
@@ -56,7 +61,7 @@ export function Coverage({ lesson }: { lesson: Lesson }) {
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState<string | null>(null);
 
-  const currentCoverage = lessonCoverage(records, lesson.id);
+  const currentCoverage = lessonCoverage(records, lesson);
   const projected = useMemo(() => {
     const union = new Set([...already, ...selected]);
     const hits = lesson.topics.filter((t) => union.has(t)).length;
@@ -76,7 +81,9 @@ export function Coverage({ lesson }: { lesson: Lesson }) {
   const commit = async () => {
     setConfirmOpen(false);
     setSaving(true);
+    if (!session) return;
     const record: TeachingRecord = buildRecord({
+      userId: session.user.id,
       lessonId: lesson.id,
       classId,
       dateTaught,
@@ -87,8 +94,8 @@ export function Coverage({ lesson }: { lesson: Lesson }) {
     try {
       await saveRecord(record);
       addRecord(record);
-      selected.forEach((t) => log('coverage', `Marked “${t}” as covered in ${lesson.title}`));
-      if (notes.trim()) log('note', `Added a teaching note to ${lesson.title}`);
+      selected.forEach((t) => log(session.user.id, 'coverage', `Marked “${t}” as covered in ${lesson.title}`));
+      if (notes.trim()) log(session.user.id, 'note', `Added a teaching note to ${lesson.title}`);
       setJustSaved(record.id);
       setSelected([]);
       setNotes('');
@@ -168,7 +175,7 @@ export function Coverage({ lesson }: { lesson: Lesson }) {
               fullWidth
             />
             <TextField label="Class" select value={classId} onChange={(e) => setClassId(e.target.value)} fullWidth>
-              {CLASSES.map((c) => (
+              {classes.map((c) => (
                 <MenuItem key={c.id} value={c.id}>
                   {c.name}
                 </MenuItem>

@@ -20,9 +20,9 @@ import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
-import { CLASSES, SUBJECTS, getClass, getSubject, lessonsFor } from '@/data/catalog';
-import { usePlatform } from '@/context/PlatformContext';
-import { lastTaught, lessonCoverage, lessonStatus } from '@/services/progressService';
+import { getClass, getSubject } from '@/data/catalog';
+import { useScope } from '@/hooks/useScope';
+import { filterLessons, lastTaught, lessonCoverage, lessonStatus } from '@/services/progressService';
 import { EmptyState, PageHeader, StatusChip, progressColor } from '@/components/common';
 import { fmtDate } from '@/utils/format';
 import type { LessonStatus } from '@/types';
@@ -33,7 +33,7 @@ export function LessonsPage() {
   const theme = useTheme();
   const isCompact = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
-  const { records } = usePlatform();
+  const { lessons, records, classes, subjects } = useScope();
 
   const effectiveSubject = subjectId ?? params.get('subject') ?? undefined;
   const cls = getClass(classId);
@@ -43,11 +43,11 @@ export function LessonsPage() {
   const [status, setStatus] = useState<'all' | LessonStatus>('all');
 
   const rows = useMemo(() => {
-    return lessonsFor(cls?.id, subject?.id)
+    return filterLessons(lessons, cls?.id, subject?.id)
       .map((lesson) => ({
         lesson,
-        coverage: lessonCoverage(records, lesson.id),
-        status: lessonStatus(records, lesson.id),
+        coverage: lessonCoverage(records, lesson),
+        status: lessonStatus(records, lesson),
         last: lastTaught(records, lesson.id),
       }))
       .filter((r) => {
@@ -56,7 +56,7 @@ export function LessonsPage() {
         if (!q) return true;
         return r.lesson.title.toLowerCase().includes(q) || r.lesson.chapter.toLowerCase().includes(q);
       });
-  }, [cls?.id, subject?.id, records, query, status]);
+  }, [lessons, cls?.id, subject?.id, records, query, status]);
 
   const title = subject ? `${subject.name} lessons` : 'All lessons';
   const crumbs = cls
@@ -92,7 +92,7 @@ export function LessonsPage() {
       </Stack>
 
       {rows.length === 0 ? (
-        <EmptyState title="No lessons match" description="Try clearing the search or choosing a different status filter." />
+        <EmptyState title="No lessons match" description={lessons.length === 0 ? 'Your administrator has not assigned you any lessons yet.' : 'Try clearing the search or choosing a different status filter.'} />
       ) : isCompact ? (
         // Phone and tablet: cards, because a seven-column table is unusable at this width.
         <Stack spacing={1.5}>
@@ -170,10 +170,10 @@ export function LessonsPage() {
 
       {!cls && (
         <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
-          {CLASSES.map((c) => (
+          {classes.map((c) => (
             <Chip key={c.id} label={c.name} variant="outlined" onClick={() => navigate(`/classes/${c.id}`)} />
           ))}
-          {SUBJECTS.map((s) => (
+          {subjects.map((s) => (
             <Chip key={s.id} label={s.name} variant="outlined" onClick={() => navigate(`/lessons?subject=${s.id}`)} />
           ))}
         </Stack>

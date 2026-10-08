@@ -7,6 +7,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { ThemeProvider } from '@mui/material/styles';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { DirectoryProvider } from '@/context/DirectoryContext';
 import { PlatformProvider, usePlatform } from '@/context/PlatformContext';
 import { SecurityProvider } from '@/context/SecurityContext';
 import { ToastProvider } from '@/context/ToastContext';
@@ -20,7 +21,7 @@ import { LessonDetailsPage } from '@/pages/LessonDetailsPage';
 import { ProgressPage } from '@/pages/ProgressPage';
 import { ActivityPage } from '@/pages/ActivityPage';
 import { AdminPage } from '@/pages/AdminPage';
-import { NotFoundPage, ProfilePage, SettingsPage } from '@/pages/AccountPages';
+import { ForbiddenPage, ForcedPasswordChangePage, NotFoundPage, ProfilePage, SettingsPage } from '@/pages/AccountPages';
 import { buildTheme } from '@/theme/theme';
 
 /**
@@ -69,10 +70,19 @@ function Themed({ children }: { children: ReactNode }) {
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, restoring } = useAuth();
+  const { session, restoring, mustChangePassword } = useAuth();
   const location = useLocation();
   if (restoring) return <SplashScreen />;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  // A temporary password gets you exactly one screen: the one that replaces it.
+  if (mustChangePassword) return <ForcedPasswordChangePage />;
+  return <>{children}</>;
+}
+
+/** Admin-only routes. A teacher reaching one is told, not silently redirected. */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isAdmin } = useAuth();
+  if (!isAdmin) return <ForbiddenPage />;
   return <>{children}</>;
 }
 
@@ -110,11 +120,12 @@ function RouteBoundary({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
-    <PlatformProvider>
-      <Themed>
-        <ToastProvider>
-          <SecurityProvider>
+    <DirectoryProvider>
+      <PlatformProvider>
+        <Themed>
+          <ToastProvider>
             <AuthProvider>
+              <SecurityProvider>
               <Router>
                 <ScrollToTop />
                 <RouteBoundary>
@@ -136,7 +147,14 @@ export default function App() {
                       <Route path="lessons/:lessonId" element={<LessonDetailsPage />} />
                       <Route path="progress" element={<ProgressPage />} />
                       <Route path="activity" element={<ActivityPage />} />
-                      <Route path="admin" element={<AdminPage />} />
+                      <Route
+                        path="admin"
+                        element={
+                          <RequireAdmin>
+                            <AdminPage />
+                          </RequireAdmin>
+                        }
+                      />
                       <Route path="profile" element={<ProfilePage />} />
                       <Route path="settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFoundPage />} />
@@ -144,10 +162,11 @@ export default function App() {
                   </Routes>
                 </RouteBoundary>
               </Router>
+              </SecurityProvider>
             </AuthProvider>
-          </SecurityProvider>
-        </ToastProvider>
-      </Themed>
-    </PlatformProvider>
+          </ToastProvider>
+        </Themed>
+      </PlatformProvider>
+    </DirectoryProvider>
   );
 }

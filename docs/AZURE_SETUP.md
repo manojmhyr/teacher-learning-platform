@@ -77,16 +77,39 @@ az storage cors add \
 
 ## 3. Container layout
 
-The provider expects this structure, one folder per lesson id:
+Folders are **created by the admin console**, not by hand. When an administrator
+adds a lesson, the system derives the folder from its title and stores it on the
+lesson as `blobPrefix`:
 
 ```
-lesson-content/
-  5A-math-fractions/
+Admin enters:  Class 5A · Mathematics · "Introduction to Fractions"
+System makes:  lesson-content/math-introduction-to-fractions/
+```
+
+Each folder holds:
+
+```
+lesson-content/<folder>/
     plan.json                → ProtectedDocument
     content.json             → { videos, resources, qna, game }
     videos/<videoId>.m3u8    → HLS playlist
     resources/<resourceId>.json
 ```
+
+A folder can be **shared across classes** (one plan taught to 5A, 6B and 7A) or
+kept per-class. The admin console shows which lessons share a folder.
+
+### Why paths are derived, never typed
+
+`src/services/lessonKey.ts` owns derivation and validation. Admins pick an
+existing folder from a list rather than typing one, and `isSafeBlobPrefix` is
+re-checked before every storage request. This prevents three real problems: a
+typo pointing a lesson at an empty folder, a lesson reaching another class's
+content, and path traversal such as `../other-container/`.
+
+**Validate the prefix on the backend too.** The client check is a convenience;
+the server must reject any blob path that is not inside the requesting
+teacher's entitled lesson folder.
 
 ### Why JSON and not PDF
 
@@ -140,6 +163,8 @@ public SasResponse mintSas(@RequestParam String container,
                            Authentication auth) {
 
     // 1. Entitlement check — the part that actually protects content.
+    //    Resolve the lesson from the blob prefix, then confirm this teacher has
+    //    a teacher_assignment row for that lesson's class AND subject.
     if (!entitlementService.canAccess(auth.getName(), blob)) {
         throw new AccessDeniedException("Not entitled to this lesson");
     }

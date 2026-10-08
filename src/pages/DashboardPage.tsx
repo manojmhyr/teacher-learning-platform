@@ -14,10 +14,10 @@ import ClassOutlinedIcon from '@mui/icons-material/ClassOutlined';
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import LibraryBooksOutlinedIcon from '@mui/icons-material/LibraryBooksOutlined';
 import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
-import { CLASSES, LESSONS, SUBJECTS, getLesson } from '@/data/catalog';
 import { usePlatform } from '@/context/PlatformContext';
 import { useAuth } from '@/context/AuthContext';
-import { averageCoverage, lessonCoverage, statusCounts } from '@/services/progressService';
+import { useScope } from '@/hooks/useScope';
+import { averageCoverage, filterLessons, lessonCoverage, statusCounts } from '@/services/progressService';
 import { PageHeader, ProgressRing, ProgressRow } from '@/components/common';
 import { ActivityList } from '@/pages/ActivityPage';
 import { greeting } from '@/utils/format';
@@ -47,20 +47,24 @@ function StatCard({ icon, label, value, caption }: { icon: React.ReactNode; labe
 
 export function DashboardPage() {
   const { session } = useAuth();
-  const { records, activities, ready } = usePlatform();
+  const { ready } = usePlatform();
+  const { lessons, records, classes, subjects } = useScope();
+  const { activitiesFor } = usePlatform();
 
-  const counts = useMemo(() => statusCounts(records), [records]);
-  const overall = useMemo(() => averageCoverage(records), [records]);
+  const counts = useMemo(() => statusCounts(records, lessons), [records, lessons]);
+  const overall = useMemo(() => averageCoverage(records, lessons), [records, lessons]);
 
   // The lesson most worth returning to: partly covered, most recently taught.
   const continueLesson = useMemo(() => {
-    const inProgress = records
-      .map((r) => r.lessonId)
-      .filter((id, i, arr) => arr.indexOf(id) === i)
-      .map((id) => ({ id, coverage: lessonCoverage(records, id) }))
-      .filter((l) => l.coverage > 0 && l.coverage < 100);
-    return inProgress.length ? getLesson(inProgress[0].id) : undefined;
-  }, [records]);
+    const touched = records.map((r) => r.lessonId).filter((id, i, arr) => arr.indexOf(id) === i);
+    for (const id of touched) {
+      const lesson = lessons.find((l) => l.id === id);
+      if (!lesson) continue;
+      const coverage = lessonCoverage(records, lesson);
+      if (coverage > 0 && coverage < 100) return lesson;
+    }
+    return undefined;
+  }, [records, lessons]);
 
   if (!ready || !session) {
     return (
@@ -76,24 +80,25 @@ export function DashboardPage() {
     );
   }
 
-  const teacher = session.teacher;
+  const user = session.user;
+  const activities = activitiesFor(user.id);
 
   return (
     <Box>
       <PageHeader
-        title={`${greeting()}, ${teacher.name.split(' ')[0]}`}
-        subtitle={`${teacher.role} · Employee ID ${teacher.employeeId}`}
-        actions={<Chip label={`${CLASSES.length} classes · ${SUBJECTS.length} subjects`} variant="outlined" />}
+        title={`${greeting()}, ${user.fullName.split(' ')[0]}`}
+        subtitle={`${user.title} · Employee ID ${user.employeeId}`}
+        actions={<Chip label={`${classes.length} ${classes.length === 1 ? 'class' : 'classes'} · ${subjects.length} subjects`} variant="outlined" />}
       />
 
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' } }}>
-        <StatCard icon={<GroupsOutlinedIcon fontSize="small" />} label="My Classes" value={String(teacher.classIds.length)} caption="Assigned this year" />
-        <StatCard icon={<ClassOutlinedIcon fontSize="small" />} label="Subjects" value={String(teacher.subjectIds.length)} caption="Mathematics, Science" />
+        <StatCard icon={<GroupsOutlinedIcon fontSize="small" />} label="My Classes" value={String(classes.length)} caption="Assigned this year" />
+        <StatCard icon={<ClassOutlinedIcon fontSize="small" />} label="Subjects" value={String(subjects.length)} caption={subjects.map((s) => s.name).join(", ") || "None assigned"} />
         <StatCard
           icon={<LibraryBooksOutlinedIcon fontSize="small" />}
           label="Active Lessons"
           value={String(counts.in_progress + counts.not_started)}
-          caption={`${LESSONS.length} lessons in total`}
+          caption={`${lessons.length} lessons assigned to you`}
         />
         <StatCard icon={<TrendingUpOutlinedIcon fontSize="small" />} label="Lessons Covered" value={`${overall}%`} caption={`${counts.completed} completed`} />
       </Box>
@@ -103,7 +108,7 @@ export function DashboardPage() {
           <CardContent>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
               <Stack direction="row" spacing={2} alignItems="center">
-                <ProgressRing value={lessonCoverage(records, continueLesson.id)} />
+                <ProgressRing value={lessonCoverage(records, continueLesson)} />
                 <Box>
                   <Typography variant="overline" color="text.secondary">
                     Continue teaching
@@ -128,8 +133,8 @@ export function DashboardPage() {
             <Typography variant="h6" gutterBottom>
               Teaching progress by class
             </Typography>
-            {CLASSES.map((c) => (
-              <ProgressRow key={c.id} label={c.name} value={averageCoverage(records, c.id)} />
+            {classes.map((c) => (
+              <ProgressRow key={c.id} label={c.name} value={averageCoverage(records, filterLessons(lessons, c.id))} />
             ))}
             <Divider sx={{ my: 2 }} />
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>

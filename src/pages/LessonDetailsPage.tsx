@@ -26,8 +26,10 @@ import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import QuizOutlinedIcon from '@mui/icons-material/QuizOutlined';
 import SportsEsportsOutlinedIcon from '@mui/icons-material/SportsEsportsOutlined';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
-import type { LessonContent, ProtectedDocument, Resource, Video } from '@/types';
-import { getClass, getLesson, getSubject } from '@/data/catalog';
+import type { Lesson, LessonContent, ProtectedDocument, Resource, Video } from '@/types';
+import { getClass, getSubject } from '@/data/catalog';
+import { useAuth } from '@/context/AuthContext';
+import { useDirectory } from '@/context/DirectoryContext';
 import { formatDuration, formatSize } from '@/data/demoContent';
 import { contentProvider } from '@/services/content';
 import { lessonCoverage, lastTaught } from '@/services/progressService';
@@ -54,8 +56,16 @@ const TABS = [
 
 export function LessonDetailsPage() {
   const { lessonId } = useParams();
-  const lesson = getLesson(lessonId);
-  const { records, log } = usePlatform();
+  const { session } = useAuth();
+  const directory = useDirectory();
+  const { records: allRecords, log } = usePlatform();
+  // Resolved through the directory so an unassigned or unpublished lesson is
+  // simply not found, whatever URL was typed.
+  const lesson = useMemo(
+    () => directory.lessonsForUser(session?.user ?? null).find((l) => l.id === lessonId),
+    [directory, session, lessonId],
+  );
+  const records = useMemo(() => allRecords.filter((r) => r.userId === session?.user.id), [allRecords, session]);
   const { toast } = useToast();
 
   const [tab, setTab] = useState(0);
@@ -70,17 +80,18 @@ export function LessonDetailsPage() {
     const controller = new AbortController();
     setContent(null);
     setLoadError(null);
+    if (!lesson) return;
     contentProvider
-      .getLessonContent(lessonId, controller.signal)
+      .getLessonContent(lesson, controller.signal)
       .then(setContent)
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
         setLoadError(err instanceof Error ? err.message : 'Could not load lesson content.');
       });
     return () => controller.abort();
-  }, [lessonId]);
+  }, [lessonId, lesson]);
 
-  const coverage = useMemo(() => (lesson ? lessonCoverage(records, lesson.id) : 0), [records, lesson]);
+  const coverage = useMemo(() => lessonCoverage(records, lesson), [records, lesson]);
   const last = useMemo(() => (lesson ? lastTaught(records, lesson.id) : null), [records, lesson]);
 
   if (!lesson) return <Navigate to="/lessons" replace />;
@@ -90,9 +101,9 @@ export function LessonDetailsPage() {
 
   const openVideo = async (video: Video) => {
     try {
-      const url = await contentProvider.getVideoUrl(lesson.id, video);
+      const url = await contentProvider.getVideoUrl(lesson, video);
       setActiveVideo({ video, url });
-      log('watch_video', `Watched “${video.title}”`);
+      if (session) log(session.user.id, 'watch_video', `Watched “${video.title}”`);
     } catch {
       toast('Could not open this video. Please try again.', 'error');
     }
@@ -100,9 +111,9 @@ export function LessonDetailsPage() {
 
   const openResource = async (resource: Resource) => {
     try {
-      const doc = await contentProvider.getResourceDocument(lesson.id, resource);
+      const doc = await contentProvider.getResourceDocument(lesson, resource);
       setActiveResource(doc);
-      log('resource', `Viewed “${resource.name}”`);
+      if (session) log(session.user.id, 'resource', `Viewed “${resource.name}”`);
     } catch {
       toast('Could not open this resource. Please try again.', 'error');
     }
@@ -110,7 +121,7 @@ export function LessonDetailsPage() {
 
   const onTabChange = (next: number) => {
     setTab(next);
-    if (TABS[next].key === 'plan') log('view_plan', `Opened the lesson plan for ${lesson.title}`);
+    if (TABS[next].key === 'plan' && session) log(session.user.id, 'view_plan', `Opened the lesson plan for ${lesson.title}`);
   };
 
   return (
@@ -245,7 +256,7 @@ export function LessonDetailsPage() {
         (content ? (
           <FractionGame
             questions={content.game}
-            onComplete={(score, total) => log('game', `Played Fraction Match — scored ${score} / ${total}`)}
+            onComplete={(score, total) => session && log(session.user.id, 'game', `Played Fraction Match — scored ${score} / ${total}`)}
           />
         ) : (
           <Skeleton variant="rounded" height={320} />
@@ -270,7 +281,7 @@ export function LessonDetailsPage() {
   );
 }
 
-function OverviewTab({ lesson, coverage, last }: { lesson: ReturnType<typeof getLesson> & {}; coverage: number; last: string | null }) {
+function OverviewTab({ lesson, coverage, last }: { lesson: Lesson; coverage: number; last: string | null }) {
   return (
     <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' } }}>
       <Card variant="outlined">

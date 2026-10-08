@@ -1,15 +1,42 @@
 export type LessonStatus = 'not_started' | 'in_progress' | 'completed';
 export type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced';
+export type Role = 'TEACHER' | 'ADMIN';
 
-export interface Teacher {
+/**
+ * A portal account. Accounts are created by an administrator — there is no
+ * self-registration — and a temporary password is handed over in person.
+ */
+export interface User {
   id: string;
   employeeId: string;
-  name: string;
-  role: string;
+  fullName: string;
   email: string;
-  classIds: string[];
-  subjectIds: string[];
-  joinedOn: string;
+  title: string;
+  role: Role;
+  /** Forces the change-password screen on next sign in. */
+  mustChange: boolean;
+  /** Deactivated rather than deleted, so teaching history survives. */
+  active: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
+/** Stored separately from the profile, exactly as it would be server-side. */
+export interface Credential {
+  userId: string;
+  passwordHash: string;
+  changedAt: string;
+}
+
+/**
+ * The three-way link that decides what a teacher can see.
+ * A teacher sees a lesson only if an assignment covers its class AND subject.
+ */
+export interface TeacherAssignment {
+  userId: string;
+  classId: string;
+  subjectId: string;
+  assignedAt: string;
 }
 
 export interface ClassRoom {
@@ -32,7 +59,6 @@ export interface Subject {
 export interface Lesson {
   id: string;
   title: string;
-  slug: string;
   description: string;
   classId: string;
   subjectId: string;
@@ -41,8 +67,23 @@ export interface Lesson {
   difficulty: Difficulty;
   objectives: string[];
   materials: string[];
-  /** Checklist the teacher records coverage against. */
+  /** The coverage checklist teachers record against. */
   topics: string[];
+  /**
+   * Folder in Azure Blob Storage holding this lesson's content. Always derived
+   * from `contentKey` by the system — never typed by hand — so a lesson can
+   * never be pointed at another lesson's content or escape the container.
+   */
+  blobPrefix: string;
+  /**
+   * Which content folder this lesson uses. Defaults to a per-class key, but
+   * several classes can share one key when the same plan is taught to each.
+   */
+  contentKey: string;
+  /** Teachers see nothing until an admin publishes it. */
+  published: boolean;
+  createdBy?: string;
+  createdAt: string;
 }
 
 /** A paragraph-level unit of a protected document. Highlights anchor to these. */
@@ -62,7 +103,6 @@ export interface ProtectedDocument {
   title: string;
   subtitle: string;
   pages: DocPage[];
-  /** Where the bytes came from — surfaced in the UI for transparency. */
   origin: 'demo' | 'azure';
 }
 
@@ -71,7 +111,6 @@ export interface Video {
   title: string;
   description: string;
   durationSec: number;
-  /** Resolved at view time; for Azure this is a short-lived SAS URL. */
   streamUrl?: string;
   poster?: string;
 }
@@ -111,6 +150,7 @@ export interface LessonContent {
 export interface TeachingRecord {
   /** Client-generated UUID, used as the idempotency key on the API. */
   id: string;
+  userId: string;
   lessonId: string;
   classId: string;
   dateTaught: string;
@@ -120,16 +160,20 @@ export interface TeachingRecord {
   createdAt: string;
 }
 
+export type ActivityKind = 'login' | 'view_plan' | 'watch_video' | 'coverage' | 'note' | 'game' | 'resource' | 'admin' | 'security';
+
+/** One line of the audit trail. Admins see every user's; teachers see their own. */
 export interface Activity {
   id: string;
+  userId: string;
   at: string;
-  kind: 'login' | 'view_plan' | 'watch_video' | 'coverage' | 'note' | 'game' | 'resource';
+  kind: ActivityKind;
   text: string;
 }
 
-/** A personal annotation layer over a read-only document. */
 export interface Annotation {
   id: string;
+  userId: string;
   documentId: string;
   pageNumber: number;
   blockId: string;
